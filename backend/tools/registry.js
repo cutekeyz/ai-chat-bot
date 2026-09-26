@@ -1,13 +1,8 @@
-import {
-  searchProducts,
-  getProduct,
-  checkStock,
-  createOrder,
-} from "./productionTools.js";
+import { tools } from "./index.js";
 
-export const availableTools = {
-  searchProducts,
-  getProduct,
-  checkStock,
-  createOrder,
-};
+export const availableTools = Object.fromEntries(
+  tools.map((tool) => [
+    tool.name,
+    tool.execute,
+  ])
+);
