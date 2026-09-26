@@ -3,7 +3,7 @@ import {
   getProduct,
   checkStock,
   createOrder,
-} from "./productTools.js";
+} from "./productionTools.js";
 
 export const availableTools = {
   searchProducts,
