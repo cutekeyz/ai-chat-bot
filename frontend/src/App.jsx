@@ -1,9 +1,13 @@
-import ChatBot from "../../frontend/src/components/ChatBot"
+// import ChatBot from "../../frontend/src/components/ChatBot"
+
+import ProfileExtractor from "./components/ProfileExtractor"
+
 
 const App = () => {
   return (
     <>
-      <ChatBot />
+      {/* <ChatBot /> */}
+      <ProfileExtractor />
     </>
   )
 }

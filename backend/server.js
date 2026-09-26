@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
+// import { searchProducts } from "./tools/productionTools.js";
 
 dotenv.config();
 
@@ -15,6 +16,7 @@ const groq = new Groq({
 });
 
 const PORT = process.env.PORT
+
 
 app.get("/", (req, res) => {
   res.json({
@@ -162,19 +164,19 @@ app.post("/api/profile", async (req, res) => {
 
             properties: {
               name: {
-                type: "string",
+                type: ["string","null"]
               },
 
               level: {
-                type: "integer",
+                type: ["integer", "null"]
               },
 
               course: {
-                type: "string",
+                type: ["string", "null"]
               },
 
               profession: {
-                type: "string",
+                type: ["string", "null"]
               },
             },
 
@@ -214,6 +216,62 @@ app.post("/api/profile", async (req, res) => {
 //     });
 //   }
 // });
+
+
+app.post("/api/tool-test", async (req, res) => {
+  const { message } = req.body;
+
+  const tools = [
+    {
+      type: "function",
+      function: {
+        name: "searchProducts",
+        description:
+          "Search products using a maximum price.",
+        parameters: {
+          type: "object",
+          properties: {
+            maxPrice: {
+              type: "number",
+              description:
+                "The maximum price of the products to return.",
+            },
+          },
+          required: ["maxPrice"],
+        },
+      },
+    },
+  ];
+
+  try {
+    const response = await groq.chat.completions.create({
+      model: "openai/gpt-oss-120b",
+
+      messages: [
+        {
+          role: "user",
+          content: message,
+        },
+      ],
+
+      tools,
+    });
+
+    console.log(
+      JSON.stringify(response, null, 2)
+    );
+
+    res.json(response);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: "Something went wrong.",
+    });
+  }
+});
+
+
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
