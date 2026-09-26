@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
-// import { searchProducts } from "./tools/productionTools.js";
+import { searchProducts, getProduct, checkStock, createOrder } from "./tools/productionTools.js";
 
 dotenv.config();
 
@@ -16,13 +16,20 @@ const groq = new Groq({
 });
 
 const PORT = process.env.PORT
-
+const MAX_TOOL_ROUNDS = 5;
 
 app.get("/", (req, res) => {
   res.json({
     message: "AI chatbot backend is running",
   });
 });
+
+const availableTools = {
+  searchProducts,
+  getProduct,
+  checkStock,
+  createOrder
+};
 
 // FOR STEP ONE
 
@@ -217,61 +224,210 @@ app.post("/api/profile", async (req, res) => {
 //   }
 // });
 
-
 app.post("/api/tool-test", async (req, res) => {
   const { message } = req.body;
 
-  const tools = [
-    {
-      type: "function",
-      function: {
-        name: "searchProducts",
-        description:
-          "Search products using a maximum price.",
-        parameters: {
-          type: "object",
-          properties: {
-            maxPrice: {
-              type: "number",
-              description:
-                "The maximum price of the products to return.",
-            },
-          },
-          required: ["maxPrice"],
+const tools = [
+   {
+  type: "function",
+
+  function: {
+    name: "searchProducts",
+
+    description:
+      "Search the product catalog by product name or maximum price.",
+
+    parameters: {
+      type: "object",
+
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "A product name or keyword to search for.",
+        },
+
+        maxPrice: {
+          type: "number",
+          description:
+            "The maximum price of products to return.",
         },
       },
+
+      required: [],
     },
-  ];
+  },
+},
 
-  try {
-    const response = await groq.chat.completions.create({
-      model: "openai/gpt-oss-120b",
-
-      messages: [
-        {
-          role: "user",
-          content: message,
+  {
+    type: "function",
+    function: {
+      name: "getProduct",
+      description:
+        "Get detailed information about a specific product using its product ID.",
+      parameters: {
+        type: "object",
+        properties: {
+          productId: {
+            type: "integer",
+            description:
+              "The ID of the product to retrieve.",
+          },
         },
-      ],
+        required: ["productId"],
+      },
+    },
+  },
 
+  {
+  type: "function",
+  function: {
+    name: "checkStock",
+
+    description:
+      "Check how many units of a product are currently in stock.",
+
+    parameters: {
+      type: "object",
+
+      properties: {
+        productId: {
+          type: "integer",
+          description:
+            "The ID of the product to check.",
+        },
+      },
+
+      required: ["productId"],
+    },
+  },
+},
+
+  {
+  type: "function",
+
+  function: {
+    name: "createOrder",
+
+    description:
+      "Create an order for a product when the user explicitly wants to purchase or order something. Use the product ID and quantity. If the product ID is unknown, first use the available product-search tools to identify the product.",
+
+    parameters: {
+      type: "object",
+
+      properties: {
+        productId: {
+          type: "integer",
+          description:
+            "The ID of the product the user wants to purchase.",
+        },
+
+        quantity: {
+          type: "integer",
+          description:
+            "The number of units the user wants to purchase.",
+        },
+      },
+
+      required: [
+        "productId",
+        "quantity",
+      ],
+    },
+  },
+},
+
+];
+
+    const messages = [
+  {
+    role: "user",
+    content: message,
+  },
+];
+
+const MAX_TOOL_ROUNDS = 5;
+
+let toolRound = 0;
+
+while (toolRound < MAX_TOOL_ROUNDS) {
+  toolRound++;
+
+  console.log(
+    `Tool round: ${toolRound}`
+  );
+
+  const response =
+    await groq.chat.completions.create({
+      model: "openai/gpt-oss-120b",
+      messages,
       tools,
     });
 
-    console.log(
-      JSON.stringify(response, null, 2)
-    );
+  const assistantMessage =
+    response.choices[0].message;
 
-    res.json(response);
-  } catch (error) {
-    console.error(error);
+  messages.push(assistantMessage);
 
-    res.status(500).json({
-      error: "Something went wrong.",
+  const toolCalls =
+    assistantMessage.tool_calls;
+
+  if (!toolCalls || toolCalls.length === 0) {
+    return res.json({
+      message: assistantMessage.content,
     });
   }
+
+  for (const toolCall of toolCalls) {
+    const toolName =
+      toolCall.function.name;
+
+    const args = JSON.parse(
+      toolCall.function.arguments
+    );
+
+    const toolFunction =
+      availableTools[toolName];
+
+    if (!toolFunction) {
+      messages.push({
+        role: "tool",
+        tool_call_id: toolCall.id,
+        content: JSON.stringify({
+          error: `Unknown tool: ${toolName}`,
+        }),
+      });
+
+      continue;
+    }
+
+    let result;
+
+    try {
+      result = await toolFunction(args);
+    } catch (error) {
+      result = {
+        error: `Tool execution failed: ${error.message}`,
+      };
+    }
+
+    console.log("Tool:", toolName);
+    console.log("Arguments:", args);
+    console.log("Result:", result);
+
+    messages.push({
+      role: "tool",
+      tool_call_id: toolCall.id,
+      content: JSON.stringify(result),
+    });
+  }
+}
+   
+return res.status(500).json({
+  error:
+    "The AI reached the maximum number of tool calls.",
+    })
 });
-
-
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
