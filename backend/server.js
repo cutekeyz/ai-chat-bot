@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import Groq from "groq-sdk";
 import { toolDefinitions } from "./tools/definitions.js";
 import { availableTools } from "./tools/registry.js";
+import crypto from "crypto";
 
 dotenv.config();
 
@@ -17,6 +18,8 @@ const groq = new Groq({
 });
 
 const PORT = process.env.PORT
+
+const pendingActions = new Map();
 
 
 app.get("/", (req, res) => {
@@ -288,10 +291,10 @@ app.post("/api/tool-test", async (req, res) => {
           continue;
         }
 
-        const toolFunction =
+        const tool =
           availableTools[toolName];
 
-        if (!toolFunction) {
+        if (!tool) {
           messages.push({
             role: "tool",
             tool_call_id: toolCall.id,
@@ -303,9 +306,29 @@ app.post("/api/tool-test", async (req, res) => {
           continue;
         }
 
+       if (tool.requiresConfirmation) {
+          const confirmationId =
+            crypto.randomUUID();
+
+          pendingActions.set(
+            confirmationId,
+            {
+              toolName: tool.name,
+              arguments: args,
+            }
+          );
+
+          return res.json({
+            requiresConfirmation: true,
+            confirmationId,
+            tool: tool.name,
+            arguments: args,
+          });
+        }
+
         try {
           const result =
-            await toolFunction(args);
+            await tool.execute(args);
 
           console.log(
             "Tool:",
@@ -352,6 +375,58 @@ app.post("/api/tool-test", async (req, res) => {
     });
   }
 });
+
+app.post(
+  "/api/tool-test/confirm",
+  async (req, res) => {
+    const { confirmationId } =
+      req.body;
+
+    const pendingAction =
+      pendingActions.get(
+        confirmationId
+      );
+
+    if (!pendingAction) {
+      return res.status(404).json({
+        error:
+          "Confirmation request not found or has expired.",
+      });
+    }
+
+    const tool =
+      availableTools[
+        pendingAction.toolName
+      ];
+
+    if (!tool) {
+      return res.status(400).json({
+        error: "Tool no longer exists.",
+      });
+    }
+
+    try {
+      const result =
+        await tool.execute(
+          pendingAction.arguments
+        );
+
+      pendingActions.delete(
+        confirmationId
+      );
+
+      return res.json({
+        success: true,
+        result,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error:
+          `Tool execution failed: ${error.message}`,
+      });
+    }
+  }
+);
 
 
 app.listen(PORT, () => {

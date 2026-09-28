@@ -6,7 +6,6 @@ export const toolDefinitions = tools.map((tool) => ({
   function: {
     name: tool.name,
     description: tool.description,
-
     parameters: tool.parameters,
   },
 }));
