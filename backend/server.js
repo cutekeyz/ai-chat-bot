@@ -2,7 +2,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
-import { toolDefinitions } from "./tools/definitions.js";
 import { availableTools } from "./tools/registry.js";
 import crypto from "crypto";
 
@@ -20,8 +19,6 @@ const groq = new Groq({
 const PORT = process.env.PORT
 
 const pendingActions = new Map();
-
-const conversations = new Map();
 
 
 app.get("/", (req, res) => {
@@ -224,6 +221,7 @@ app.post("/api/profile", async (req, res) => {
 //   }
 // });
 
+
 app.post("/api/tool-test", async (req, res) => {
   const {
     conversationId,
@@ -243,180 +241,50 @@ app.post("/api/tool-test", async (req, res) => {
   }
 
   try {
-    // 1. Get existing conversation
-    let messages =
-      conversations.get(conversationId);
-
-    // 2. Create conversation if it doesn't exist
-    if (!messages) {
-      messages = [];
-
-      conversations.set(
-        conversationId,
-        messages
+    const messages =
+      getOrCreateConversation(
+        conversationId
       );
-    }
 
-    // 3. Add user's message
     messages.push({
       role: "user",
       content: message,
     });
 
-    const MAX_TOOL_ROUNDS = 5;
+    const result =
+      await runAgent(messages);
 
-    let toolRound = 0;
+    if (result.type === "confirmation") {
+      const confirmationId =
+        crypto.randomUUID();
 
-    // 4. Start agent loop
-    while (toolRound < MAX_TOOL_ROUNDS) {
-      toolRound++;
-
-      console.log(
-        `Tool round: ${toolRound}`
+      pendingActions.set(
+        confirmationId,
+        {
+          toolName: result.tool.name,
+          arguments: result.arguments,
+          conversationId,
+          toolCallId:
+            result.toolCall.id,
+        }
       );
 
-      const response =
-        await groq.chat.completions.create({
-          model: "openai/gpt-oss-120b",
-          messages,
-          tools: toolDefinitions,
-        });
-
-      // 5. Get AI response
-      const assistantMessage =
-        response.choices[0].message;
-
-      // 6. Save AI response
-      messages.push(assistantMessage);
-
-      const toolCalls =
-        assistantMessage.tool_calls;
-
-      // 7. No tools → final answer
-      if (
-        !toolCalls ||
-        toolCalls.length === 0
-      ) {
-        return res.json({
-          message: assistantMessage.content,
-        });
-      }
-
-      // 8. Execute requested tools
-      for (const toolCall of toolCalls) {
-        const toolName =
-          toolCall.function.name;
-
-        let args;
-
-        // 9. Parse arguments
-        try {
-          args = JSON.parse(
-            toolCall.function.arguments
-          );
-        } catch (error) {
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify({
-              error:
-                "Invalid tool arguments.",
-            }),
-          });
-
-          continue;
-        }
-
-        // 10. Find tool
-        const tool =
-          availableTools[toolName];
-
-        if (!tool) {
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify({
-              error:
-                `Unknown tool: ${toolName}`,
-            }),
-          });
-
-          continue;
-        }
-
-        // 11. Check confirmation
-        if (tool.requiresConfirmation) {
-          const confirmationId =
-            crypto.randomUUID();
-
-          pendingActions.set(
-            confirmationId,
-            {
-              toolName: tool.name,
-              arguments: args,
-              conversationId,
-              toolCallId: toolCall.id,
-            }
-          );
-
-          return res.json({
-            requiresConfirmation: true,
-            confirmationId,
-            tool: tool.name,
-            arguments: args,
-          });
-        }
-
-        // 12. Execute tool
-        try {
-          const result =
-            await tool.execute(args);
-
-          console.log(
-            "Tool:",
-            toolName
-          );
-
-          console.log(
-            "Arguments:",
-            args
-          );
-
-          console.log(
-            "Result:",
-            result
-          );
-
-          // 13. Save tool result
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content:
-              JSON.stringify(result),
-          });
-        } catch (error) {
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify({
-              error:
-                `Tool execution failed: ${error.message}`,
-            }),
-          });
-        }
-      }
+      return res.json({
+        requiresConfirmation: true,
+        confirmationId,
+        tool: result.tool.name,
+        arguments: result.arguments,
+      });
     }
 
-    return res.status(500).json({
-      error:
-        "The AI reached the maximum number of tool calls.",
+    return res.json({
+      message: result.message,
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
-      error:
-        "Something went wrong.",
+      error: "Something went wrong.",
     });
   }
 });
