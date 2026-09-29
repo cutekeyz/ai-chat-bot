@@ -21,6 +21,8 @@ const PORT = process.env.PORT
 
 const pendingActions = new Map();
 
+const conversations = new Map();
+
 
 app.get("/", (req, res) => {
   res.json({
@@ -223,20 +225,49 @@ app.post("/api/profile", async (req, res) => {
 // });
 
 app.post("/api/tool-test", async (req, res) => {
-  const { message } = req.body;
+  const {
+    conversationId,
+    message,
+  } = req.body;
+
+  if (!conversationId) {
+    return res.status(400).json({
+      error: "conversationId is required.",
+    });
+  }
+
+  if (!message?.trim()) {
+    return res.status(400).json({
+      error: "Message is required.",
+    });
+  }
 
   try {
-    const messages = [
-      {
-        role: "user",
-        content: message,
-      },
-    ];
+    // 1. Get existing conversation
+    let messages =
+      conversations.get(conversationId);
+
+    // 2. Create conversation if it doesn't exist
+    if (!messages) {
+      messages = [];
+
+      conversations.set(
+        conversationId,
+        messages
+      );
+    }
+
+    // 3. Add user's message
+    messages.push({
+      role: "user",
+      content: message,
+    });
 
     const MAX_TOOL_ROUNDS = 5;
 
     let toolRound = 0;
 
+    // 4. Start agent loop
     while (toolRound < MAX_TOOL_ROUNDS) {
       toolRound++;
 
@@ -251,14 +282,17 @@ app.post("/api/tool-test", async (req, res) => {
           tools: toolDefinitions,
         });
 
+      // 5. Get AI response
       const assistantMessage =
         response.choices[0].message;
 
+      // 6. Save AI response
       messages.push(assistantMessage);
 
       const toolCalls =
         assistantMessage.tool_calls;
 
+      // 7. No tools → final answer
       if (
         !toolCalls ||
         toolCalls.length === 0
@@ -268,12 +302,14 @@ app.post("/api/tool-test", async (req, res) => {
         });
       }
 
+      // 8. Execute requested tools
       for (const toolCall of toolCalls) {
         const toolName =
           toolCall.function.name;
 
         let args;
 
+        // 9. Parse arguments
         try {
           args = JSON.parse(
             toolCall.function.arguments
@@ -291,6 +327,7 @@ app.post("/api/tool-test", async (req, res) => {
           continue;
         }
 
+        // 10. Find tool
         const tool =
           availableTools[toolName];
 
@@ -299,14 +336,16 @@ app.post("/api/tool-test", async (req, res) => {
             role: "tool",
             tool_call_id: toolCall.id,
             content: JSON.stringify({
-              error: `Unknown tool: ${toolName}`,
+              error:
+                `Unknown tool: ${toolName}`,
             }),
           });
 
           continue;
         }
 
-       if (tool.requiresConfirmation) {
+        // 11. Check confirmation
+        if (tool.requiresConfirmation) {
           const confirmationId =
             crypto.randomUUID();
 
@@ -315,6 +354,8 @@ app.post("/api/tool-test", async (req, res) => {
             {
               toolName: tool.name,
               arguments: args,
+              conversationId,
+              toolCallId: toolCall.id,
             }
           );
 
@@ -326,6 +367,7 @@ app.post("/api/tool-test", async (req, res) => {
           });
         }
 
+        // 12. Execute tool
         try {
           const result =
             await tool.execute(args);
@@ -345,10 +387,12 @@ app.post("/api/tool-test", async (req, res) => {
             result
           );
 
+          // 13. Save tool result
           messages.push({
             role: "tool",
             tool_call_id: toolCall.id,
-            content: JSON.stringify(result),
+            content:
+              JSON.stringify(result),
           });
         } catch (error) {
           messages.push({
@@ -371,62 +415,100 @@ app.post("/api/tool-test", async (req, res) => {
     console.error(error);
 
     return res.status(500).json({
-      error: "Something went wrong.",
+      error:
+        "Something went wrong.",
     });
   }
 });
 
-app.post(
-  "/api/tool-test/confirm",
-  async (req, res) => {
-    const { confirmationId } =
-      req.body;
 
-    const pendingAction =
-      pendingActions.get(
-        confirmationId
-      );
 
-    if (!pendingAction) {
-      return res.status(404).json({
-        error:
-          "Confirmation request not found or has expired.",
-      });
-    }
+app.post("/api/tool-test/confirm", async (req, res) => {
+  const { confirmationId } = req.body;
 
-    const tool =
-      availableTools[
-        pendingAction.toolName
-      ];
-
-    if (!tool) {
-      return res.status(400).json({
-        error: "Tool no longer exists.",
-      });
-    }
-
-    try {
-      const result =
-        await tool.execute(
-          pendingAction.arguments
-        );
-
-      pendingActions.delete(
-        confirmationId
-      );
-
-      return res.json({
-        success: true,
-        result,
-      });
-    } catch (error) {
-      return res.status(500).json({
-        error:
-          `Tool execution failed: ${error.message}`,
-      });
-    }
+  if (!confirmationId) {
+    return res.status(400).json({
+      error: "confirmationId is required.",
+    });
   }
-);
+
+  const pendingAction =
+    pendingActions.get(confirmationId);
+
+  if (!pendingAction) {
+    return res.status(404).json({
+      error:
+        "Confirmation request not found or has expired.",
+    });
+  }
+
+  const tool =
+    availableTools[pendingAction.toolName];
+
+  if (!tool) {
+    return res.status(400).json({
+      error: "Tool no longer exists.",
+    });
+  }
+
+  const messages =
+    conversations.get(
+      pendingAction.conversationId
+    );
+
+  if (!messages) {
+    return res.status(404).json({
+      error: "Conversation not found.",
+    });
+  }
+
+  try {
+    // 1. Execute the confirmed action
+    const result =
+      await tool.execute(
+        pendingAction.arguments
+      );
+
+    // 2. Add the tool result to the conversation
+    messages.push({
+      role: "tool",
+      tool_call_id:
+        pendingAction.toolCallId,
+      content: JSON.stringify(result),
+    });
+
+    // 3. Ask the LLM to interpret the result
+    const finalResponse =
+      await groq.chat.completions.create({
+        model: "openai/gpt-oss-120b",
+        messages,
+      });
+
+    // 4. Get the assistant's final response
+    const assistantMessage =
+      finalResponse.choices[0].message;
+
+    // 5. Save that response to conversation history
+    messages.push(assistantMessage);
+
+    // 6. Remove the pending action
+    pendingActions.delete(confirmationId);
+
+    // 7. Send the final response to Postman
+    return res.json({
+      success: true,
+      message: assistantMessage.content,
+      result,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      error:
+        `Tool execution failed: ${error.message}`,
+    });
+  }
+});
 
 
 app.listen(PORT, () => {
