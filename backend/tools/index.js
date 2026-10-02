@@ -9,6 +9,7 @@ export const tools = [
   {
     name: "searchProducts",
     type: "read",
+    permission: "read",
     requiresConfirmation: false,
 
     description:
@@ -90,6 +91,7 @@ export const tools = [
   {
     name: "createOrder",
     type: "action",
+    permission: "write",
     requiresConfirmation: true,
 
     description:

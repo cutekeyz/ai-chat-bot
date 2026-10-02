@@ -1,4 +1,7 @@
 import { availableTools } from "../tools/registry.js";
+import {
+  canExecuteAutomatically,
+} from "./executionPolicy.js";
 
 export const executeToolCall = async (toolCall) => {
   const toolName = toolCall.function.name;
@@ -25,15 +28,15 @@ export const executeToolCall = async (toolCall) => {
     };
   }
 
-  if (tool.requiresConfirmation) {
-    return {
-      success: false,
-      requiresConfirmation: true,
-      tool,
-      toolCall,
-      arguments: args,
-    };
-  }
+   if (!canExecuteAutomatically(tool)) {
+  return {
+    success: false,
+    requiresConfirmation: true,
+    tool,
+    toolCall,
+    arguments: args,
+  };
+}
 
   try {
     const result =
