@@ -385,7 +385,7 @@ app.post("/api/tool-test/confirm", async (req, res) => {
     messages.push(assistantMessage);
 
     // 6. Remove the pending action
-    pendingActions.delete(confirmationId);
+    // pendingActions.delete(confirmationId);
 
     // 7. Send the final response to Postman
     return res.json({
