@@ -19,13 +19,13 @@ export const tools = [
 
       properties: {
         query: {
-          type: "string",
+          type: ["string", "null"],
           description:
             "A product name or keyword to search for.",
         },
 
         maxPrice: {
-          type: "number",
+          type: ["number", "null"],
           description:
             "The maximum price of products to return.",
         },

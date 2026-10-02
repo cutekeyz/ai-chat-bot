@@ -2,8 +2,16 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
-import { availableTools } from "./tools/registry.js";
 import crypto from "crypto";
+import { runAgent } from "./agent/agent.js";
+import { toolDefinitions } from "./tools/definitions.js";
+
+import {
+  getConversation,
+  getOrCreateConversation,
+} from "./conversations/conversationStore.js";
+
+import { availableTools } from "./tools/registry.js";
 
 dotenv.config();
 
@@ -12,13 +20,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY
-});
-
 const PORT = process.env.PORT
 
 const pendingActions = new Map();
+
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
 
 
 app.get("/", (req, res) => {
@@ -241,7 +249,13 @@ app.post("/api/tool-test", async (req, res) => {
   }
 
   try {
-    const messages =
+
+      // const messages =
+      // getOrCreateConversation(
+      //   pendingActions.conversationId
+      // );
+
+      const messages =
       getOrCreateConversation(
         conversationId
       );
@@ -264,10 +278,20 @@ app.post("/api/tool-test", async (req, res) => {
           toolName: result.tool.name,
           arguments: result.arguments,
           conversationId,
-          toolCallId:
-            result.toolCall.id,
+          toolCallId: result.toolCall.id,
+          assistantMessage: result.assistantMessage,
         }
       );
+
+      //  console.log(
+      //   "Stored confirmation:",
+      //   confirmationId
+      // );
+
+      // console.log(
+      //   "Pending actions:",
+      //   pendingActions
+      // );
 
       return res.json({
         requiresConfirmation: true,
@@ -319,10 +343,15 @@ app.post("/api/tool-test/confirm", async (req, res) => {
     });
   }
 
-  const messages =
-    conversations.get(
-      pendingAction.conversationId
-    );
+  // const messages =
+  //   getOrCreateConversation(
+  //     pendingAction.conversationId
+  //   );
+
+       const messages =
+        getConversation(
+          pendingAction.conversationId
+        );
 
   if (!messages) {
     return res.status(404).json({
@@ -338,6 +367,11 @@ app.post("/api/tool-test/confirm", async (req, res) => {
       );
 
     // 2. Add the tool result to the conversation
+      // messages.push(
+      // pendingAction.assistantMessage
+      // );
+
+
     messages.push({
       role: "tool",
       tool_call_id:
@@ -345,11 +379,20 @@ app.post("/api/tool-test/confirm", async (req, res) => {
       content: JSON.stringify(result),
     });
 
+//     console.log(
+//   "Messages before final response:"
+// );
+
+      console.dir(messages, {
+        depth: null,
+      });
+
     // 3. Ask the LLM to interpret the result
-    const finalResponse =
+      const finalResponse = 
       await groq.chat.completions.create({
         model: "openai/gpt-oss-120b",
         messages,
+        tools: toolDefinitions,
       });
 
     // 4. Get the assistant's final response

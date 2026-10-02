@@ -1,7 +1,9 @@
+import dotenv from "dotenv";
 import Groq from "groq-sdk";
-
 import { toolDefinitions } from "../tools/definitions.js";
 import { availableTools } from "../tools/registry.js";
+
+dotenv.config();
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -79,11 +81,24 @@ export const runAgent = async (messages) => {
       }
 
       if (tool.requiresConfirmation) {
+
+        console.log("\n===== ASSISTANT MESSAGE BEFORE CONFIRMATION =====");
+
+        console.dir(assistantMessage, {
+          depth: null,
+        });
+
+        console.log("\n===== MESSAGES BEFORE CONFIRMATION =====");
+
+        console.dir(messages, {
+          depth: null,
+        });
         return {
           type: "confirmation",
           tool,
           toolCall,
           arguments: args,
+          assistantMessage,
         };
       }
 
@@ -91,11 +106,17 @@ export const runAgent = async (messages) => {
         const result =
           await tool.execute(args);
 
+          console.log("\n===== TOOL CALL =====");
+          console.log("Tool:", toolName);
+          console.log("Arguments:", args);
+          console.log("Result:", result);
+
         messages.push({
           role: "tool",
           tool_call_id: toolCall.id,
           content: JSON.stringify(result),
         });
+
       } catch (error) {
         messages.push({
           role: "tool",
