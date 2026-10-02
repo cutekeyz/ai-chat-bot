@@ -14,7 +14,7 @@ export const createConfirmation = ({
 
   pendingActions.set(confirmationId, {
     toolName,
-    arguments: args,
+    toolArguments: args,
     conversationId,
     toolCallId,
     assistantMessage,

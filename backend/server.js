@@ -2,10 +2,13 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
-import crypto from "crypto";
 import { runAgent } from "./agent/agent.js";
 import { toolDefinitions } from "./tools/definitions.js";
-
+import {
+  createConfirmation,
+  getConfirmation,
+  deleteConfirmation,
+} from "./confirmations/confirmationManager.js";
 import {
   getConversation,
   getOrCreateConversation,
@@ -21,8 +24,6 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT
-
-const pendingActions = new Map();
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -268,30 +269,16 @@ app.post("/api/tool-test", async (req, res) => {
     const result =
       await runAgent(messages);
 
-    if (result.type === "confirmation") {
+     if (result.type === "confirmation") {
       const confirmationId =
-        crypto.randomUUID();
-
-      pendingActions.set(
-        confirmationId,
-        {
+        createConfirmation({
           toolName: result.tool.name,
           arguments: result.arguments,
           conversationId,
           toolCallId: result.toolCall.id,
-          assistantMessage: result.assistantMessage,
-        }
-      );
-
-      //  console.log(
-      //   "Stored confirmation:",
-      //   confirmationId
-      // );
-
-      // console.log(
-      //   "Pending actions:",
-      //   pendingActions
-      // );
+          assistantMessage:
+            result.assistantMessage,
+        });
 
       return res.json({
         requiresConfirmation: true,
@@ -300,7 +287,6 @@ app.post("/api/tool-test", async (req, res) => {
         arguments: result.arguments,
       });
     }
-
     return res.json({
       message: result.message,
     });
@@ -324,8 +310,8 @@ app.post("/api/tool-test/confirm", async (req, res) => {
     });
   }
 
-  const pendingAction =
-    pendingActions.get(confirmationId);
+    const pendingAction =
+      getConfirmation(confirmationId);
 
   if (!pendingAction) {
     return res.status(404).json({
@@ -343,10 +329,6 @@ app.post("/api/tool-test/confirm", async (req, res) => {
     });
   }
 
-  // const messages =
-  //   getOrCreateConversation(
-  //     pendingAction.conversationId
-  //   );
 
        const messages =
         getConversation(
@@ -363,7 +345,7 @@ app.post("/api/tool-test/confirm", async (req, res) => {
     // 1. Execute the confirmed action
     const result =
       await tool.execute(
-        pendingAction.arguments
+        pendingAction.toolArguments
       );
 
     // 2. Add the tool result to the conversation
